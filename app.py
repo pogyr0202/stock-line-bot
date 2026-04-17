@@ -38,11 +38,15 @@ def predict_stock(ticker):
             p = model.predict(current_batch, verbose=0)[0]
             preds.append(p)
             current_batch = np.append(current_batch[:, 1:, :], [[p]], axis=1)
+                # 予測結果の計算
         actual_preds = scaler.inverse_transform(preds)
-        res = f"【{ticker} 予測推移】\n"
-        for i in [0, 4, 9, 14, 19, 24, 29]:
-            res += f"{i+1}日後: {actual_preds[i][0]:.1f}円\n"
+        diff = actual_preds[29][0] - actual_preds[0][0] # 30日後と1日後の差
+        
+        res = f"【{ticker} 予測結果】\n"
+        res += f"30日間の予測推移: {'+' if diff > 0 else ''}{diff:.1f}円\n"
+        res += f"（1日後: {actual_preds[0][0]:.1f}円 → 30日後: {actual_preds[29][0]:.1f}円）"
         return res
+
     except:
         return "予測エラー。銘柄を確認してください。"
 
