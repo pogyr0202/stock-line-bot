@@ -11,30 +11,41 @@ app = Flask(__name__)
 line_bot_api = LineBotApi('gCpKFk6xSV/6ngm6UYCopsSOaKV5NrOdE3bs5IJQLI2CL1nK1eJaQzEGw4+rbK/B2eX2GkyVfh3roE2AE66ShFdgstCvmDAfanmfyLgMVesG2DCdugf7501YjEG3y+pouCZMcXYfHNrMDJCARl/gtwdB04t89/1O/w1cDnyilFU=')
 handler = WebhookHandler('819afe02261cce3b569dd0d9e849701c')
 
-def get_company_name(ticker):
-    """名前を執念深く取得する関数"""
+def get_company_name_v2(ticker_input):
+    """名前を検索機能で無理やり取得する強化版"""
+    # .Tを外した数字（例: 7203）の方が検索にヒットしやすい
+    clean_ticker = ticker_input.split('.')[0]
+    
     try:
-        stock = yf.Ticker(ticker)
-        # 方法1: infoから取得（基本）
-        name = stock.info.get('longName') or stock.info.get('shortName')
-        if name: return name
-
-        # 方法2: Search機能を使って逆引き（強力）
-        search = yf.Search(ticker, max_results=1)
+        # yf.Searchを使って、その銘柄コードの「名前」だけを狙い撃ち
+        search = yf.Search(clean_ticker, max_results=2)
         if search.quotes:
-            return search.quotes[0].get('longname') or search.quotes[0].get('shortname')
-        
-        # 方法3: 履歴データのメタ情報から取得
-        name = stock.history_metadata.get('symbol')
-        return name if name else ticker
+            for quote in search.quotes:
+                # 入力されたコードと一致する、または日本株っぽい結果の名前を採用
+                if quote.get('symbol').startswith(clean_ticker):
+                    name = quote.get('longname') or quote.get('shortname')
+                    if name: return name
     except:
-        return ticker
-
-def predict_stock_final(ticker_input):
+        pass
+    
+    # 最後の手段: infoから取得
     try:
-        ticker = ticker_input.upper()
+        stock = yf.Ticker(ticker_input)
+        name = stock.info.get('shortName') or stock.info.get('longName')
+        if name: return name
+    except:
+        pass
+        
+    return ticker_input # どうしてもダメならコードを表示
+
+def predict_stock_final(user_input):
+    try:
+        ticker = user_input.upper()
         if len(ticker) == 4 and ticker.isdigit():
             ticker += ".T"
+        
+        # 会社名を先に取得（強化版）
+        company_name = get_company_name_v2(ticker)
         
         stock = yf.Ticker(ticker)
         data = stock.history(period='60d')
@@ -42,16 +53,15 @@ def predict_stock_final(ticker_input):
         if data.empty:
             return f"銘柄 {ticker} が見つかりませんでした。"
 
-        # 会社名の取得（強化版関数を呼び出し）
-        company_name = get_company_name(ticker)
-
         prices = data['Close'].values
         current_price = float(prices[-1])
         
+        # トレンド計算
         ma5 = np.mean(prices[-5:])
         ma20 = np.mean(prices[-20:])
         trend = (ma5 - ma20) / 15
         
+        # メッセージ作成
         res = f"【{company_name}】\n"
         res += f"現在値: {current_price:.1f}円\n\n"
         
@@ -68,7 +78,7 @@ def predict_stock_final(ticker_input):
         
         return res
     except Exception:
-        return "解析エラーが発生しました。"
+        return "解析エラー。数字4桁を試してください。"
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -83,4 +93,3 @@ def handle_message(event):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port)
-
