@@ -7,7 +7,7 @@ import numpy as np
 
 app = Flask(__name__)
 
-# ご提示いただいたトークンをセットしました
+# 設定済みトークン
 line_bot_api = LineBotApi('gCpKFk6xSV/6ngm6UYCopsSOaKV5NrOdE3bs5IJQLI2CL1nK1eJaQzEGw4+rbK/B2eX2GkyVfh3roE2AE66ShFdgstCvmDAfanmfyLgMVesG2DCdugf7501YjEG3y+pouCZMcXYfHNrMDJCARl/gtwdB04t89/1O/w1cDnyilFU=')
 handler = WebhookHandler('819afe02261cce3b569dd0d9e849701c')
 
@@ -18,28 +18,36 @@ def predict_stock_final(ticker_input):
             ticker += ".T"
         
         stock = yf.Ticker(ticker)
-        # データの取得
         data = stock.history(period='60d')
         
         if data.empty:
-            return f"銘柄 {ticker} が見つかりませんでした。数字4桁で試してください。"
+            return f"銘柄 {ticker} が見つかりませんでした。"
 
-        # 企業名の取得（もっとも軽量な方法）
-        company_name = ticker
+        # 【修正】企業名を3段階の方法で探しに行きます
+        company_name = ticker # 予備
         try:
-            company_name = stock.fast_info.get('commonName') or ticker
+            # 1. 一番軽いデータから探す
+            company_name = stock.fast_info.get('commonName')
+            if not company_name:
+                # 2. 基本情報から探す
+                company_name = stock.info.get('shortName') or stock.info.get('longName')
         except:
             pass
         
+        # 名前が取れなかった時の最後の手段（yfinanceの隠しデータから抽出）
+        if not company_name or company_name == ticker:
+            try:
+                company_name = stock.history_metadata.get('symbol')
+            except:
+                pass
+
         prices = data['Close'].values
         current_price = float(prices[-1])
         
-        # トレンド計算
         ma5 = np.mean(prices[-5:])
         ma20 = np.mean(prices[-20:])
         trend = (ma5 - ma20) / 15
         
-        # メッセージ作成
         res = f"【{company_name}】\n"
         res += f"現在値: {current_price:.1f}円\n\n"
         
@@ -56,7 +64,7 @@ def predict_stock_final(ticker_input):
         
         return res
     except Exception:
-        return "解析エラー。銘柄コード（例: 7203）を試してください。"
+        return "解析エラー。銘柄コードを試してください。"
 
 @app.route("/callback", methods=['POST'])
 def callback():
