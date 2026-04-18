@@ -1,5 +1,4 @@
 import numpy as np
-import pandas as pd
 import yfinance as yf
 from flask import Flask, request
 from linebot import LineBotApi, WebhookHandler
@@ -8,76 +7,58 @@ import os
 
 app = Flask(__name__)
 
-# LINEの設定（ご自身のものに書き換えてください）
+# LINE設定（ご自身のものに！）
 line_bot_api = LineBotApi('gCpKFk6xSV/6ngm6UYCopsSOaKV5NrOdE3bs5IJQLI2CL1nK1eJaQzEGw4+rbK/B2eX2GkyVfh3roE2AE66ShFdgstCvmDAfanmfyLgMVesG2DCdugf7501YjEG3y+pouCZMcXYfHNrMDJCARl/gtwdB04t89/1O/w1cDnyilFU=')
 handler = WebhookHandler('819afe02261cce3b569dd0d9e849701c')
 
-def get_ticker(text):
-    """企業名からコードを検索する（精度向上版）"""
-    # 既に入力自体がコードっぽい場合はそのまま返す
-    if text.replace('.', '').isdigit() or ('.' in text and text.split('.')[0].isdigit()):
-        return text.upper()
-    
+def predict_stock_final_v2(user_input):
     try:
-        # 日本語での検索
-        search = yf.Search(text, max_results=3)
-        if search.quotes:
-            # 日本株(.T)を優先的に探す
-            for q in search.quotes:
-                symbol = q['symbol']
-                if symbol.endswith('.T'):
-                    return symbol
-            # なければ1番目を返す
-            return search.quotes[0]['symbol']
-    except:
-        pass
-    return None
-
-def predict_stock_final(user_input):
-    try:
-        ticker = get_ticker(user_input)
-        if not ticker:
-            return f"「{user_input}」に該当する銘柄が見つかりませんでした。"
-
+        # 1. 銘柄コードの特定
+        ticker = user_input.upper()
+        # もし数字4桁だけなら「.T」を自動で付ける
+        if len(ticker) == 4 and ticker.isdigit():
+            ticker += ".T"
+        
+        # 2. データの取得
         stock = yf.Ticker(ticker)
-        # 余裕を持って少し多めにデータを取る
-        data = stock.history(period='100d')
-        if data.empty: return f"銘柄 {ticker} のデータが取得できませんでした。"
+        data = stock.history(period='60d')
         
-        # 企業名と現在値
-        info = stock.info
-        company_name = info.get('longName', ticker)
-        current_price = data['Close'].values[-1]
+        # もしデータが空なら、企業名での検索を試みる
+        if data.empty:
+            search = yf.Search(user_input, max_results=1)
+            if search.quotes:
+                ticker = search.quotes[0]['symbol']
+                stock = yf.Ticker(ticker)
+                data = stock.history(period='60d')
         
-        # トレンド計算（20日平均を使用）
+        if data.empty:
+            return "銘柄が見つかりませんでした。「トヨタ」や「7203」のように入力してください。"
+
+        # 3. 計算処理
         prices = data['Close'].values
+        current_price = prices[-1]
         ma5 = np.mean(prices[-5:])
         ma20 = np.mean(prices[-20:])
         trend = (ma5 - ma20) / 15
         
-        # メッセージ構築
+        # 4. メッセージ構築
+        company_name = stock.info.get('shortName', ticker)
         res = f"【{company_name}】\n"
-        res += f"（コード: {ticker}）\n"
         res += f"現在値: {current_price:.1f}円\n\n"
         
-        daily_preds = []
         target_days = [1, 5, 10, 15, 20, 25, 30]
-        for d in range(1, 31):
+        for d in target_days:
             p = current_price + (trend * d)
-            daily_preds.append(p)
-            if d in target_days:
-                res += f"{d}日後: {p:.1f}円\n"
+            res += f"{d}日後: {p:.1f}円\n"
         
-        # 騰落率の計算
-        diff = daily_preds[29] - current_price
+        diff = (current_price + (trend * 30)) - current_price
         pct = (diff / current_price) * 100
         
-        res += f"\n30日間の予測推移: {'+' if diff > 0 else ''}{diff:.1f}円\n"
-        res += f"騰落率予測: {'+' if pct > 0 else ''}{pct:.1f}%\n"
-        res += "※直近20日間のトレンドに基づく予測"
+        res += f"\n30日間の推移: {'+' if diff > 0 else ''}{diff:.1f}円\n"
+        res += f"騰落率予測: {'+' if pct > 0 else ''}{pct:.1f}%"
         return res
-    except:
-        return "解析中にエラーが発生しました。"
+    except Exception as e:
+        return f"エラー: 銘柄コード（例: 7203）を試してください。"
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -86,11 +67,11 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    user_text = event.message.text
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"「{user_text}」を検索して解析中..."))
-    result = predict_stock_final(user_text)
-    line_bot_api.push_message(event.source.user_id, TextSendMessage(text=result))
+    # 返信
+    result = predict_stock_final_v2(event.message.text)
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=result))
 
 if __name__ == "__main__":
+    # Renderのポートに確実に合わせる設定
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port)
