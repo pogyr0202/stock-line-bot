@@ -9,7 +9,7 @@ app = Flask(__name__)
 
 # LINE設定（ご自身のものに書き換えてください）
 line_bot_api = LineBotApi('gCpKFk6xSV/6ngm6UYCopsSOaKV5NrOdE3bs5IJQLI2CL1nK1eJaQzEGw4+rbK/B2eX2GkyVfh3roE2AE66ShFdgstCvmDAfanmfyLgMVesG2DCdugf7501YjEG3y+pouCZMcXYfHNrMDJCARl/gtwdB04t89/1O/w1cDnyilFU=')
-handler = WebhookHandler('Ue58a36b4aa45b1eeb12408f2e368df0a')
+handler = WebhookHandler('819afe02261cce3b569dd0d9e849701c')
 
 def predict_stock_simple(ticker_input):
     try:
