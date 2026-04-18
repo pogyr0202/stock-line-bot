@@ -8,46 +8,72 @@ import os
 
 app = Flask(__name__)
 
-# LINEの設定（自分のものに書き換えてください）
+# LINEの設定（ご自身のものに書き換えてください）
 line_bot_api = LineBotApi('gCpKFk6xSV/6ngm6UYCopsSOaKV5NrOdE3bs5IJQLI2CL1nK1eJaQzEGw4+rbK/B2eX2GkyVfh3roE2AE66ShFdgstCvmDAfanmfyLgMVesG2DCdugf7501YjEG3y+pouCZMcXYfHNrMDJCARl/gtwdB04t89/1O/w1cDnyilFU=')
 handler = WebhookHandler('819afe02261cce3b569dd0d9e849701c')
 
-def predict_stock_full_stable(ticker):
+def get_ticker_from_name(name):
+    """企業名からティッカーシンボルを探す関数"""
     try:
-        # 過去60日分のデータを取得
-        data = yf.download(ticker, period='60d', interval='1d')
-        if data.empty: return "銘柄が見つかりません"
+        # yfinanceの検索機能を使用
+        search = yf.Search(name, max_results=1)
+        if search.quotes:
+            # 検索結果の1番目のシンボル（コード）を返す
+            return search.quotes[0]['symbol']
+    except:
+        pass
+    return None
+
+def predict_stock_v4(user_input):
+    try:
+        # 1. まず入力された言葉で検索してコードを取得
+        # （数字だけの場合はそのまま、文字の場合は検索）
+        ticker = user_input
+        if not user_input.replace('.', '').isdigit():
+            found_ticker = get_ticker_from_name(user_input)
+            if found_ticker:
+                ticker = found_ticker
+            else:
+                return "その企業名では銘柄が見つかりませんでした。"
+
+        # 2. データの取得
+        stock = yf.Ticker(ticker)
+        data = stock.history(period='60d')
+        if data.empty: return f"銘柄コード {ticker} のデータが見つかりません"
         
-        # 終値のリストを取得
-        prices = data['Close'].values.flatten()
+        # 企業名などの情報
+        info = stock.info
+        company_name = info.get('longName', ticker)
+        prices = data['Close'].values
         current_price = prices[-1]
         
-        # トレンド（勢い）を計算（直近5日平均と20日平均の差から算出）
+        # トレンド計算
         ma5 = np.mean(prices[-5:])
         ma20 = np.mean(prices[-20:])
         trend = (ma5 - ma20) / 15
         
-        # 1日から30日後までの毎日の価格を計算
+        # 予測メッセージ作成
+        res = f"【{company_name}】\n"
+        res += f"（検索結果: {ticker}）\n"
+        res += f"現在値: {current_price:.1f}円\n\n"
+        
         daily_predictions = []
+        show_days = [1, 5, 10, 15, 20, 25, 30]
         for day in range(1, 31):
             pred_price = current_price + (trend * day)
             daily_predictions.append(pred_price)
+            if day in show_days:
+                res += f"{day}日後: {pred_price:.1f}円\n"
         
-        # メッセージ作成
-        diff = daily_predictions[29] - current_price
-        res = f"【{ticker} 予測推移】\n"
-        
-        # 5日おきに表示（全部出すと長すぎるので調整。1,5,10,15,20,25,30日後）
-        show_days = [1, 5, 10, 15, 20, 25, 30]
-        for d in show_days:
-            res += f"{d}日後: {daily_predictions[d-1]:.1f}円\n"
+        pred_30d = daily_predictions[29]
+        diff = pred_30d - current_price
+        pct = (diff / current_price) * 100
         
         res += f"\n30日間の予測推移: {'+' if diff > 0 else ''}{diff:.1f}円\n"
-        res += "※直近のトレンドから算出した安定予測です。"
-        
+        res += f"騰落率予測: {'+' if pct > 0 else ''}{pct:.1f}%\n"
         return res
     except Exception as e:
-        return f"予測エラーが発生しました。"
+        return f"解析エラーが発生しました。"
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -56,10 +82,10 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    ticker = event.message.text.upper()
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"「{ticker}」を解析中..."))
+    user_text = event.message.text
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"「{user_text}」を検索して解析中..."))
     
-    result_text = predict_stock_full_stable(ticker)
+    result_text = predict_stock_v4(user_text)
     line_bot_api.push_message(event.source.user_id, TextSendMessage(text=result_text))
 
 if __name__ == "__main__":
