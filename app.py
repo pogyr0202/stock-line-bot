@@ -11,6 +11,25 @@ app = Flask(__name__)
 line_bot_api = LineBotApi('gCpKFk6xSV/6ngm6UYCopsSOaKV5NrOdE3bs5IJQLI2CL1nK1eJaQzEGw4+rbK/B2eX2GkyVfh3roE2AE66ShFdgstCvmDAfanmfyLgMVesG2DCdugf7501YjEG3y+pouCZMcXYfHNrMDJCARl/gtwdB04t89/1O/w1cDnyilFU=')
 handler = WebhookHandler('819afe02261cce3b569dd0d9e849701c')
 
+def get_company_name(ticker):
+    """名前を執念深く取得する関数"""
+    try:
+        stock = yf.Ticker(ticker)
+        # 方法1: infoから取得（基本）
+        name = stock.info.get('longName') or stock.info.get('shortName')
+        if name: return name
+
+        # 方法2: Search機能を使って逆引き（強力）
+        search = yf.Search(ticker, max_results=1)
+        if search.quotes:
+            return search.quotes[0].get('longname') or search.quotes[0].get('shortname')
+        
+        # 方法3: 履歴データのメタ情報から取得
+        name = stock.history_metadata.get('symbol')
+        return name if name else ticker
+    except:
+        return ticker
+
 def predict_stock_final(ticker_input):
     try:
         ticker = ticker_input.upper()
@@ -23,23 +42,8 @@ def predict_stock_final(ticker_input):
         if data.empty:
             return f"銘柄 {ticker} が見つかりませんでした。"
 
-        # 【修正】企業名を3段階の方法で探しに行きます
-        company_name = ticker # 予備
-        try:
-            # 1. 一番軽いデータから探す
-            company_name = stock.fast_info.get('commonName')
-            if not company_name:
-                # 2. 基本情報から探す
-                company_name = stock.info.get('shortName') or stock.info.get('longName')
-        except:
-            pass
-        
-        # 名前が取れなかった時の最後の手段（yfinanceの隠しデータから抽出）
-        if not company_name or company_name == ticker:
-            try:
-                company_name = stock.history_metadata.get('symbol')
-            except:
-                pass
+        # 会社名の取得（強化版関数を呼び出し）
+        company_name = get_company_name(ticker)
 
         prices = data['Close'].values
         current_price = float(prices[-1])
@@ -64,7 +68,7 @@ def predict_stock_final(ticker_input):
         
         return res
     except Exception:
-        return "解析エラー。銘柄コードを試してください。"
+        return "解析エラーが発生しました。"
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -79,3 +83,4 @@ def handle_message(event):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port)
+
