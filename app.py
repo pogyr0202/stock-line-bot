@@ -4,6 +4,8 @@ from linebot import LineBotApi, WebhookHandler
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import os
 import numpy as np
+import requests
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
@@ -11,37 +13,41 @@ app = Flask(__name__)
 line_bot_api = LineBotApi('gCpKFk6xSV/6ngm6UYCopsSOaKV5NrOdE3bs5IJQLI2CL1nK1eJaQzEGw4+rbK/B2eX2GkyVfh3roE2AE66ShFdgstCvmDAfanmfyLgMVesG2DCdugf7501YjEG3y+pouCZMcXYfHNrMDJCARl/gtwdB04t89/1O/w1cDnyilFU=')
 handler = WebhookHandler('819afe02261cce3b569dd0d9e849701c')
 
-def get_company_name_v3(ticker_input):
-    """アルファベット混じりのコードでも執念深く名前を探す"""
-    clean_ticker = ticker_input.split('.')[0]
-    try:
-        # まずは検索機能で名前を探す
-        search = yf.Search(clean_ticker, max_results=2)
-        if search.quotes:
-            for quote in search.quotes:
-                if quote.get('symbol').startswith(clean_ticker):
-                    name = quote.get('longname') or quote.get('shortname')
-                    if name: return name
-    except:
-        pass
+def get_japanese_name(ticker_input):
+    """日本のYahoo!ファイナンスから日本語名をスクレイピングする"""
+    # 285A.T -> 285A に変換
+    code = ticker_input.split('.')[0]
+    url = f"https://finance.yahoo.co.jp/quote/{code}.T"
     
     try:
-        # 検索で見つからなければ直接情報を取る
-        stock = yf.Ticker(ticker_input)
-        return stock.info.get('shortName') or stock.info.get('longName') or ticker_input
+        response = requests.get(url, timeout=5)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        # ページのタイトルから企業名を取得（例：トヨタ自動車(株)【7203】）
+        title = soup.find('title').get_text()
+        if '【' in title:
+            name = title.split('【')[0]
+            # 「(株)」などを残したい場合はこのまま、消したい場合は replace してください
+            return name
+        return ticker_input
     except:
         return ticker_input
 
 def predict_stock_final(user_input):
     try:
         ticker = user_input.upper()
-        # 【ここを修正】
-        # 4〜5文字で、数字が1つでも含まれていて、ドットがない場合は日本株(.T)にする
+        # 日本株の判定（4-5文字で数字を含む場合）
         if "." not in ticker and 4 <= len(ticker) <= 5:
             if any(char.isdigit() for char in ticker):
                 ticker += ".T"
         
-        company_name = get_company_name_v3(ticker)
+        # 会社名の取得（日本語版を優先）
+        if ticker.endswith(".T"):
+            company_name = get_japanese_name(ticker)
+        else:
+            # 米国株などは従来通り yfinance で取得
+            stock_info = yf.Ticker(ticker)
+            company_name = stock_info.info.get('shortName') or ticker
+        
         stock = yf.Ticker(ticker)
         data = stock.history(period='60d')
         
@@ -51,7 +57,7 @@ def predict_stock_final(user_input):
         prices = data['Close'].values
         current_price = float(prices[-1])
         
-        # トレンド計算（簡易版）
+        # トレンド計算
         ma5 = np.mean(prices[-5:])
         ma20 = np.mean(prices[-20:])
         trend = (ma5 - ma20) / 15
@@ -72,7 +78,7 @@ def predict_stock_final(user_input):
         
         return res
     except Exception:
-        return "解析エラーが発生しました。コードを再確認してください。"
+        return "解析エラーが発生しました。"
 
 @app.route("/callback", methods=['POST'])
 def callback():
